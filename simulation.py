@@ -31,29 +31,27 @@ class Depot:
 
 depots = {}
 
-def find_alternative(primary_depot_key, aircraft_type):
+aircraft_depot_mapping = {
+    "B-1B": ["Tinker"],
+    "B-52": ["Tinker"],
+    "KC-135": ["Tinker"],
+    "F/A-18": ["FRCSW", "JASDF"],
+    "H-60": ["FRCSW"],
+    "V-22": ["FRCSW", "JASDF"],
+    "RC-135": ["Waddington", "JASDF"],
+    "ISR": ["Waddington"],
+    "F-15J": ["JASDF"]
+}
+
+def find_alternative(primary_depot, eligible_depots):
     """
-    Return an alternative depot key if available based on simple routing rules.
-    For USAF/USN, try switching between Tinker and FRCSW if applicable.
-    For allied depots, switch between Waddington and JASDF if allowed.
+    Given the primary depot and a list of eligible depot names,
+    return an alternative depot (from the eligible list, excluding the primary)
+    with the smallest resource queue.
     """
-    alternatives = []
-    # Check cross-service alternatives
-    if primary_depot_key == 'FRCSW' and aircraft_type in depots['Tinker'].service_types:
-        alternatives.append('Tinker')
-    elif primary_depot_key == 'Tinker' and aircraft_type in depots['FRCSW'].service_types:
-        alternatives.append('FRCSW')
-    
-    # Check allied alternatives if policy allows
-    if POLICY_ALLIED_INTEGRATION:
-        if primary_depot_key == 'Waddington' and aircraft_type in depots['JASDF'].service_types:
-            alternatives.append('JASDF')
-        elif primary_depot_key == 'JASDF' and aircraft_type in depots['Waddington'].service_types:
-            alternatives.append('Waddington')
-    
+    alternatives = [d for d in eligible_depots if d != primary_depot and d in depots]
     if alternatives:
-        # Return the alternative with the smallest queue length.
-        return min(alternatives, key=lambda key: len(depots[key].resource.queue))
+        return min(alternatives, key=lambda d: len(depots[d].resource.queue))
     return None
 
 def initialize_depots(env):
@@ -128,9 +126,12 @@ def initialize_depots(env):
         capacity=3,
         service_times={
             ('F-15J','engine'): 35/24,
-            ('F-15J','routine'): 30/24
+            ('F-15J','routine'): 30/24,
+            ('F/A-18','engine'): 32/24,      # Additional service times for F/A-18 if serviced here
+            ('V-22','engine'): 34/24,         # Example additional service times
+            ('RC-135','avionics'): 40/24      # Example additional service times
         },
-        service_types=['F-15J'],
+        service_types=['F-15J','F/A-18','V-22','RC-135'],
         location='Japan',
         is_allied=True,
         geo=(35.0, 135.0)
