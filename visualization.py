@@ -68,7 +68,8 @@ def plot_geospatial_depots(depot_data, sim_time):
         })
     df_geo = pd.DataFrame(data)
     fig = px.scatter_mapbox(df_geo, lat="Latitude", lon="Longitude", hover_name="Depot",
-                            size="Utilization", color="Utilization", size_max=15, zoom=1,
+                            size="Utilization", color="Utilization",color_continuous_scale="Viridis",# pick any named scale
+                            range_color=[0, 1],size_max=15, zoom=1,
                             mapbox_style="open-street-map",
                             title="Depot Locations & Utilization")
     return fig
