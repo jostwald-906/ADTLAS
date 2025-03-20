@@ -17,6 +17,8 @@ from exec_summary_genai import generate_exec_summary_genai
 
 st.set_page_config(page_title="ADTLAS Digital Twin", layout="wide")
 st.title("ADTLAS: Advanced Digital Twin for Logistics & Sustainment")
+st.write("API Key:", os.getenv("OPENAI_API_KEY"))
+
 
 # ---------------------- SIDEBAR ----------------------
 st.sidebar.header("Simulation Parameters & Scenario Builder")
