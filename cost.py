@@ -4,7 +4,7 @@ import numpy as np
 
 from config import COST_PER_HOUR_DOWNTIME, REPAIR_COST_MULTIPLIER, INVESTMENT_COST_PER_CAPACITY_UNIT
 
-def compute_task_costs(df_tasks, labor_rate=50, overhead_rate=2000, shipping_rate=0.5):
+def compute_task_costs(df_tasks, labor_rate=500, overhead_rate=2000, shipping_rate=10000):
     """
     Assign multiple cost categories to each task in df_tasks:
       - labor_cost: (service_time in hours) * labor_rate
