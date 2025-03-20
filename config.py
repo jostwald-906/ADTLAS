@@ -14,7 +14,7 @@ POLICY_ITAR_RESTRICTED = True    # ITAR restrictions enabled by default
 POLICY_ALLIED_INTEGRATION = True # Allow allied depots to receive tasks
 
 # Economic parameters
-COST_PER_HOUR_DOWNTIME = 15000   # $15,000 per hour of downtime
+COST_PER_HOUR_DOWNTIME = 5000   # $15,000 per hour of downtime
 REPAIR_COST_MULTIPLIER = 1.5     # Multiplier for service time cost estimation
 INVESTMENT_COST_PER_CAPACITY_UNIT = 750000  # $750,000 per additional capacity unit
 
