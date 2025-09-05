@@ -66,7 +66,8 @@ def build_copilot_context(scen: dict) -> str:
     df_day   = scen.get("df_day",   pd.DataFrame())
     depots   = scen.get("depot_data", {})
     sim_days = float(scen.get("sim_time", 1.0)) or 1.0
-
+    inv_df   = scen.get("inventory_stats_df", pd.DataFrame())
+    
     # Key metrics
     total_tasks = len(df_tasks)
     avg_wait_h  = float(df_tasks["wait_time"].mean() * 24) if total_tasks else 0.0
@@ -209,22 +210,6 @@ def copilot_dialog():
             "role":"system",
             "content":"You are the ADTLAS sustainment copilot. Be concise, action-oriented, and specific; focus on readiness, availability, cost, and ROI."
         }
-        messages = [
-            base_sys,
-            {"role": "system", "name": "scenario_context", "content": context_blob}
-        ]
-
-        # Optionally include the full snapshot if the checkbox was ticked
-        if snapshot_blob:
-            messages.append({
-                "role": "system",
-                "name": "results_snapshot",
-                "content": snapshot_blob
-            })
-        
-        # Then add your rolling history and the current user message
-        messages.extend(_short_hist())
-        messages.append({"role": "user", "content": msg})
 
 
         try:
@@ -360,59 +345,43 @@ with tabs[1]:
         st.markdown(f"**Average Service Time:** {avg_service:.2f} hours")
         
         # Get the JSON output from your GenAI function
+       # Get JSON from your GenAI function
         scen = st.session_state.scenario_data[selected_scenario_exec]
         exec_summary = generate_exec_summary_genai(
             scen["df_tasks"],
             scen["depot_data"],
             scen["sim_time"],
-            scen.get("inventory_stats_df")            # NEW: pass inventory stats in
+            scen.get("inventory_stats_df")    # pass inventory stats in
         )
-                
-        # Attempt to parse the JSON and render a custom narrative layout
+        
         try:
-            
-            summary_data = json.loads(exec_summary_json)
-            
-            # Render the content in a more narrative style
+            # Parse the JSON string returned by ExecSummaryModel.json()
+            summary_data = json.loads(exec_summary)
+        
             st.markdown("### Executive Summary")
-            
             st.markdown(summary_data.get("summary_text", "_No summary text._"))
         
-            
             st.markdown("#### Key Metrics")
             st.markdown(f"- **Total Tasks**: {summary_data['total_tasks']}")
             st.markdown(f"- **Avg Wait (hours)**: {summary_data['avg_wait_hours']:.2f}")
             st.markdown(f"- **Avg Service (hours)**: {summary_data['avg_service_hours']:.2f}")
-            
+        
             st.markdown("#### Depot Utilizations")
-            depot_utils = summary_data.get("depot_utilizations", {})
-            if depot_utils:
-                for depot, utilization in depot_utils.items():
-                    st.markdown(f"- **{depot}**: {utilization}%")
-            else:
-                st.markdown("_No depot utilization data._")
-            
+            for depot, utilization in summary_data.get("depot_utilizations", {}).items():
+                st.markdown(f"- **{depot}**: {utilization}%")
+        
             st.markdown("#### Inventory Availability")
-            inventory_avail = summary_data.get("inventory_availability", {})
-            if inventory_avail:
-                for part, level in inventory_avail.items():
-                    st.markdown(f"- **{part}**: average = {level['average']:.2f}, stockouts = {level['stockouts']}")
-            else:
-                st.markdown("_No inventory data._")
-            
+            for part, stats in summary_data.get("inventory_availability", {}).items():
+                st.markdown(f"- **{part}**: average = {stats['average']}, stockouts = {stats['stockouts']}")
+        
             st.markdown("#### Recommendations")
-            recs = summary_data.get("recommendations", [])
-            if recs:
-                for i, rec in enumerate(recs, start=1):
-                    st.markdown(f"{i}. {rec}")
-            else:
-                st.markdown("_No recommendations provided._")
-            
-            
+            for i, rec in enumerate(summary_data.get("recommendations", []), start=1):
+                st.markdown(f"{i}. {rec}")
+        
         except json.JSONDecodeError:
-            # If the output wasn't valid JSON, fallback to raw
             st.error("Could not parse the GenAI output as valid JSON.")
-            st.markdown(exec_summary_json)
+            st.code(exec_summary, language="json")
+
     else:
         st.info("No scenarios available for executive summary.")
 
@@ -619,6 +588,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
