@@ -3,7 +3,7 @@ import openai
 import json
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
-from supply import suppliers, compute_inventory_stats  # Ensure these are defined in your supply module
+
 
 # Load API key from environment (ensure your .env file is loaded, e.g., using python-dotenv)
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -123,3 +123,4 @@ if __name__ == '__main__':
     
     summary = generate_exec_summary_genai(df_sample, depot_sample, sim_time=30)
     print("Generated Executive Summary:\n", summary)
+
