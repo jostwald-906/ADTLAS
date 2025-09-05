@@ -42,6 +42,107 @@ daily_discount_rate = st.sidebar.number_input("Daily Discount Rate", min_value=0
 # Scenario naming & running
 st.sidebar.subheader("Create & Run Scenario")
 scenario_name = st.sidebar.text_input("Scenario Name", value="My Scenario", key="scenario_name")
+
+# Keep a tiny rolling history
+def _short_hist():
+    return [m for m in st.session_state.copilot_hist if m["role"] in ("user","assistant")][-6:]
+
+# ---- Modal UI ----
+@st.dialog("ADTLAS Copilot", width="large")
+def copilot_dialog():
+    if "copilot_hist" not in st.session_state:
+        st.session_state.copilot_hist = []
+
+    # Pick scenario to ground responses
+    if not st.session_state.scenario_data:
+        st.info("No scenarios available.")
+        return
+    scenario_name = st.selectbox(
+        "Scenario context",
+        list(st.session_state.scenario_data.keys()),
+        key="copilot_scenario_select",
+    )
+    scen = st.session_state.scenario_data[scenario_name]
+    df_tasks = scen["df_tasks"]; depot_data = scen["depot_data"]
+    sim_days = float(scen.get("sim_time", 1.0)) or 1.0
+
+    # Build fresh context (percent utilization for THIS scenario)
+    try:
+        avg_wait_h = (df_tasks["wait_time"].mean()*24) if not df_tasks.empty else 0.0
+        avg_serv_h = (df_tasks["service_time"].mean()*24) if not df_tasks.empty else 0.0
+        util_lines = []
+        for d in depot_data.values():
+            pct = (d.total_service_time/(sim_days*d.capacity)*100.0) if d.capacity else 0.0
+            util_lines.append(f"{d.name}: {pct:.2f}%")
+        context_blob = (
+            f"Scenario: {scenario_name}\n"
+            f"Total tasks: {len(df_tasks)}\n"
+            f"Avg wait (h): {avg_wait_h:.2f} | Avg service (h): {avg_serv_h:.2f}\n"
+            f"Depot utilization (%): {', '.join(util_lines)}\n"
+            "Answer ONLY from this scenario context when quoting metrics."
+        )
+    except Exception:
+        context_blob = f"Scenario: {scenario_name}\n(Context build error, proceed generally.)"
+
+    colA, colB = st.columns([1.3,1])
+    with colA:
+        model_name = st.selectbox("Model", ["gpt-4o","gpt-4","gpt-3.5-turbo"], index=0, key="copilot_model")
+    with colB:
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05, key="copilot_temp")
+
+    # Render chat history (user/assistant only)
+    for m in st.session_state.copilot_hist:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+    msg = st.chat_input("Ask the Copilot…")
+    if msg:
+        st.session_state.copilot_hist.append({"role":"user","content":msg})
+        with st.chat_message("user"): st.markdown(msg)
+
+        # Build messages fresh each send: base + scenario context + short rolling history
+        base_sys = {
+            "role":"system",
+            "content":"You are the ADTLAS sustainment copilot. Be concise, action-oriented, and specific; focus on readiness, availability, cost, and ROI."
+        }
+        messages = [
+            base_sys,
+            {"role":"system","name":"scenario_context","content":context_blob},
+            *_short_hist(),
+            {"role":"user","content":msg}
+        ]
+
+        try:
+            # openai==0.28.0 interface (your current pin)
+            resp = openai.ChatCompletion.create(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=800
+            )
+            text = resp["choices"][0]["message"]["content"]
+            with st.chat_message("assistant"): st.markdown(text)
+            st.session_state.copilot_hist.append({"role":"assistant","content":text})
+        except Exception as e:
+            st.error(f"OpenAI error: {e}")
+
+# Floating action button (bottom-right)
+fab = st.container()
+with fab:
+    st.markdown("""
+    <style>
+      .copilot-fab {position: fixed; bottom: 22px; right: 22px; z-index: 1000;}
+      .copilot-fab button {border-radius: 24px; padding: 10px 16px; background:#0E73F6; color:white;
+                           border: none; box-shadow: 0 3px 10px rgba(0,0,0,0.3);}
+    </style>
+    """, unsafe_allow_html=True)
+    launch_col = st.columns([1])[0]
+    with launch_col:
+        open_modal = st.button("💬  Copilot", key="copilot_fab")
+if open_modal:
+    copilot_dialog()
+
+
 if "scenario_data" not in st.session_state:
     st.session_state.scenario_data = {}
 
@@ -394,6 +495,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
