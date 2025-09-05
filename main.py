@@ -65,7 +65,8 @@ def run_scenario():
         "df_costs": df_costs,
         "df_day": df_day,
         "depot_data": depot_data,
-        "npc": npc
+        "npc": npc,
+        "sim_time": float(sim_time_input), 
     }
     st.success(f"Scenario '{scenario_name}' has been run and saved.")
 
@@ -264,7 +265,7 @@ with tabs[5]:
     else:
         st.info("No suppliers defined.")
 
-# Tab 7: Scenario Comparison
+# Tab: Scenario Comparison
 with tabs[6]:
     st.header("Scenario Comparison")
     scenario_list = list(st.session_state.scenario_data.keys())
@@ -284,65 +285,68 @@ with tabs[6]:
     else:
         st.info("No scenarios have been run yet.")
 
+# --- Tab: AI Copilot ---
 with tabs[7]:
     st.header("AI Copilot (Chat)")
 
-    # Initialize chat history in session_state
-    if "chat_messages" not in st.session_state:
-        st.session_state.chat_messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are the ADTLAS sustainment copilot for USAF. "
-                    "Be concise, action-oriented, and specific. Use the user's context when available. "
-                    "Focus on readiness, availability, cost efficiency, and ROI."
-                )
-            }
-        ]
+    import os, openai, json
+    openai.api_key = os.getenv("OPENAI_API_KEY")
 
-    # Optional: add current scenario context to the chat (once per selection)
-    if st.session_state.scenario_data:
-        selected_for_chat = st.selectbox(
-            "Select scenario to prime the copilot context",
-            list(st.session_state.scenario_data.keys()),
-            key="chat_scenario_select"
+    # Base system instruction (kept across turns)
+    BASE_SYSTEM = {
+        "role": "system",
+        "content": (
+            "You are the ADTLAS sustainment copilot for USAF. "
+            "Be concise, action-oriented, and specific. Focus on readiness, availability, cost efficiency, and ROI. "
+            "If asked for metrics, only use the scenario context provided."
         )
-        scen = st.session_state.scenario_data[selected_for_chat]
-        df_tasks_ctx = scen["df_tasks"]
-        depot_data_ctx = scen["depot_data"]
+    }
 
-        # Build a short, structured context string from the scenario
-        try:
-            avg_wait_h = (df_tasks_ctx["wait_time"].mean() * 24) if not df_tasks_ctx.empty else 0
-            avg_service_h = (df_tasks_ctx["service_time"].mean() * 24) if not df_tasks_ctx.empty else 0
-            util_lines = []
-            for dkey, d in depot_data_ctx.items():
-                util = (d.total_service_time / (float(st.session_state.get("sim_time", 1)) * d.capacity)) if d.capacity else 0
-                util_lines.append(f"{d.name}: {util:.2f}")
-            context_blob = (
-                f"Scenario: {selected_for_chat}\n"
-                f"Total tasks: {len(df_tasks_ctx)}\n"
-                f"Avg wait (h): {avg_wait_h:.2f}, Avg service (h): {avg_service_h:.2f}\n"
-                f"Depot utilization (fraction): {', '.join(util_lines)}\n"
-                "Use this as recent context when answering."
-            )
-        except Exception:
-            context_blob = f"Scenario: {selected_for_chat} (context build error, proceed without depot metrics)."
+    # Init chat state
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []  # we'll rebuild every send
+    if "last_chat_scenario" not in st.session_state:
+        st.session_state.last_chat_scenario = None
 
-        # Add or replace a one-time “context” message
-        if not any(m.get("role") == "system" and m.get("name") == "scenario_context"
-                   for m in st.session_state.chat_messages):
-            st.session_state.chat_messages.append({
-                "role": "system",
-                "name": "scenario_context",
-                "content": context_blob
-            })
-        else:
-            # Update existing scenario_context
-            for m in st.session_state.chat_messages:
-                if m.get("role") == "system" and m.get("name") == "scenario_context":
-                    m["content"] = context_blob
-                    break
+    if not st.session_state.scenario_data:
+        st.info("No scenarios available for chat.")
+        st.stop()
+
+    # Select scenario for the chat
+    selected_for_chat = st.selectbox(
+        "Select scenario to prime the Copilot context",
+        list(st.session_state.scenario_data.keys()),
+        key="chat_scenario_select",
+    )
+
+    # If scenario changed, clear chat to avoid stale context  (NEW)
+    if st.session_state.last_chat_scenario != selected_for_chat:
+        st.session_state.chat_messages = []  # clear prior messages
+        st.session_state.last_chat_scenario = selected_for_chat
+
+    scen = st.session_state.scenario_data[selected_for_chat]
+    df_tasks_ctx = scen["df_tasks"]
+    depot_data_ctx = scen["depot_data"]
+    scen_sim_time = float(scen.get("sim_time", 1.0)) or 1.0  # safety
+
+    # Build fresh scenario context (percent utilization, scenario sim_time)  (NEW)
+    try:
+        avg_wait_h = (df_tasks_ctx["wait_time"].mean() * 24) if not df_tasks_ctx.empty else 0.0
+        avg_service_h = (df_tasks_ctx["service_time"].mean() * 24) if not df_tasks_ctx.empty else 0.0
+        util_lines = []
+        for dkey, d in depot_data_ctx.items():
+            # percent utilization for this scenario
+            util_pct = (d.total_service_time / (scen_sim_time * d.capacity) * 100.0) if d.capacity else 0.0
+            util_lines.append(f"{d.name}: {util_pct:.2f}%")
+        context_blob = (
+            f"Scenario: {selected_for_chat}\n"
+            f"Total tasks: {len(df_tasks_ctx)}\n"
+            f"Avg wait (h): {avg_wait_h:.2f}, Avg service (h): {avg_service_h:.2f}\n"
+            f"Depot utilization (%): {', '.join(util_lines)}\n"
+            "Use ONLY this context when answering questions."
+        )
+    except Exception:
+        context_blob = f"Scenario: {selected_for_chat}\nContext build error; answer generally."
 
     # Chat settings
     col1, col2, col3 = st.columns([1.3, 1, 1])
@@ -352,39 +356,44 @@ with tabs[7]:
         temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05, key="chat_temp")
     with col3:
         if st.button("Clear chat"):
-            st.session_state.chat_messages = st.session_state.chat_messages[:1]  # keep only the base system prompt
+            st.session_state.chat_messages = []
             st.experimental_rerun()
 
-    # Render prior messages
+    # Render history (we render only user/assistant; context is rebuilt each send)  (CHANGED)
     for msg in st.session_state.chat_messages:
-        if msg["role"] in ("user", "assistant"):
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    # Chat input
     user_msg = st.chat_input("Ask the ADTLAS Copilot...")
     if user_msg:
-        # Append user message
+        # Append user message to UI history
         st.session_state.chat_messages.append({"role": "user", "content": user_msg})
         with st.chat_message("user"):
             st.markdown(user_msg)
 
-        # Call OpenAI chat completion (openai==0.28.0)
         try:
+            # Build messages fresh each call: base system + scenario context + past convo + latest user (NEW)
+            # We include prior user/assistant messages to keep short memory, but scenario context is always rebuilt.
+            short_hist = [m for m in st.session_state.chat_messages if m["role"] in ("user", "assistant")][-6:]
+            messages = [
+                BASE_SYSTEM,
+                {"role": "system", "name": "scenario_context", "content": context_blob},
+                *short_hist
+            ]
+
+            resp = openai.ChatCompletion.create(
+                model=model_name,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=800,
+            )
+            assistant_text = resp["choices"][0]["message"]["content"]
             with st.chat_message("assistant"):
-                # Simple, non-streaming call for reliability with 0.28
-                resp = openai.ChatCompletion.create(
-                    model=model_name,
-                    messages=st.session_state.chat_messages,
-                    temperature=temperature,
-                    max_tokens=800,
-                )
-                assistant_text = resp["choices"][0]["message"]["content"]
                 st.markdown(assistant_text)
-                # Save assistant response
-                st.session_state.chat_messages.append({"role": "assistant", "content": assistant_text})
+            st.session_state.chat_messages.append({"role": "assistant", "content": assistant_text})
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
