@@ -89,15 +89,20 @@ def initialize_suppliers(env):
         downtime_periods=[(380/24, 400/24)]
     )
 
-def compute_inventory_stats(supplier):
+
+def collect_inventory_stats():
     """
-    Compute average inventory level and count stockout events from the supplier's history.
-    Assumes supplier.history is a list of (time, inventory level) records.
+    Build a per-(MDS, repair_type) table with average inventory (int)
+    and stockout counts using suppliers' history.
+    Returns a pandas DataFrame with columns: mds, repair_type, average, stockouts
     """
-    if not supplier.history:
-        return {"average": None, "stockouts": 0}
-    levels = [level for (_, level) in supplier.history]
-    avg_level = sum(levels) / len(levels)
-    # Count a stockout event each time level == 0
-    stockouts = sum(1 for level in levels if level == 0)
-    return {"average": avg_level, "stockouts": stockouts}
+    rows = []
+    for (mds, repair_type), sup in suppliers.items():
+        stats = compute_inventory_stats(sup)  # {average: <float>, stockouts: <int>}
+        rows.append({
+            "mds": mds,
+            "repair_type": repair_type,
+            "average": int(round(stats.get("average", 0) or 0)),
+            "stockouts": int(stats.get("stockouts", 0) or 0),
+        })
+    return pd.DataFrame(rows)
