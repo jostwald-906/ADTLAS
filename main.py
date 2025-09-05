@@ -139,24 +139,32 @@ def build_results_snapshot(scen: dict, max_rows=400, max_chars=120000) -> str:
 # ---- Modal UI ----
 @st.dialog("ADTLAS Copilot", width="large")
 def copilot_dialog():
+    # Ensure chat history bag exists
     if "copilot_hist" not in st.session_state:
         st.session_state.copilot_hist = []
 
-    # Pick scenario to ground responses
-    if not st.session_state.scenario_data:
-        st.info("No scenarios available.")
+    # Guard: need at least one scenario
+    if "scenario_data" not in st.session_state or not st.session_state.scenario_data:
+        st.info("No scenarios available. Run a scenario first from the sidebar.")
         return
-    scenario_name = st.selectbox(
-        "Scenario context",
-        list(st.session_state.scenario_data.keys()),
-        key="copilot_scenario_select",
-    )
-    scen = st.session_state.scenario_data[scenario_name]
-    df_tasks = scen["df_tasks"]; depot_data = scen["depot_data"]
-    sim_days = float(scen.get("sim_time", 1.0)) or 1.0
 
-    # Build fresh context (percent utilization for THIS scenario)
+    # Build the list of scenario names once
+    scenario_names = list(st.session_state.scenario_data.keys())
+
+    # Single source of truth for the selection: the selectbox return value
+    selected_for_chat = st.selectbox(
+        "Scenario context",
+        scenario_names,
+        key="copilot_scenario_select"  # session key (safe to keep)
+    )
+
+    # Defensive fallback: if for some reason selectbox wasn't rendered, pick first
+    if not selected_for_chat:
+        selected_for_chat = scenario_names[0]
+
+    # Now it's safe to index the scenario_data
     scen = st.session_state.scenario_data[selected_for_chat]
+
     context_blob = build_copilot_context(scen)
 
     include_full = st.checkbox(
@@ -589,6 +597,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
