@@ -90,19 +90,32 @@ def initialize_suppliers(env):
     )
 
 
+def compute_inventory_stats(supplier):
+    """
+    Average inventory (rounded) and stockout events (<1 counts as stockout).
+    Assumes supplier.history is a list of (time, level).
+    """
+    if not getattr(supplier, "history", None):
+        return {"average": 0, "stockouts": 0}
+
+    levels = [int(round(level)) for (_, level) in supplier.history]
+    avg_level = sum(levels) / len(levels) if levels else 0
+    stockouts = sum(1 for level in levels if level == 0)
+    return {"average": int(round(avg_level)), "stockouts": stockouts}
+
 def collect_inventory_stats():
     """
-    Build a per-(MDS, repair_type) table with average inventory (int)
-    and stockout counts using suppliers' history.
-    Returns a pandas DataFrame with columns: mds, repair_type, average, stockouts
+    Per-(MDS, repair_type) table with average inventory (int) and stockout counts.
+    Returns a DataFrame with columns: mds, repair_type, average, stockouts
     """
+    from supply import suppliers  # safe local import of the global dict
     rows = []
     for (mds, repair_type), sup in suppliers.items():
-        stats = compute_inventory_stats(sup)  # {average: <float>, stockouts: <int>}
+        stats = compute_inventory_stats(sup)
         rows.append({
             "mds": mds,
             "repair_type": repair_type,
-            "average": int(round(stats.get("average", 0) or 0)),
+            "average": int(stats.get("average", 0) or 0),
             "stockouts": int(stats.get("stockouts", 0) or 0),
         })
     return pd.DataFrame(rows)
