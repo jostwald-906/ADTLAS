@@ -47,6 +47,95 @@ scenario_name = st.sidebar.text_input("Scenario Name", value="My Scenario", key=
 def _short_hist():
     return [m for m in st.session_state.copilot_hist if m["role"] in ("user","assistant")][-6:]
 
+def _pct(x):
+    try:
+        return float(x) * 100.0
+    except Exception:
+        return 0.0
+
+def build_copilot_context(scen: dict) -> str:
+    """
+    Create a compact, human-readable summary from the scenario bundle:
+    df_tasks, df_costs, df_day, depot_data, npc, sim_time.
+    Returns a small text blob to ground the Copilot.
+    """
+    df_tasks = scen.get("df_tasks", pd.DataFrame())
+    df_costs = scen.get("df_costs", pd.DataFrame())
+    df_day   = scen.get("df_day",   pd.DataFrame())
+    depots   = scen.get("depot_data", {})
+    sim_days = float(scen.get("sim_time", 1.0)) or 1.0
+
+    # Key metrics
+    total_tasks = len(df_tasks)
+    avg_wait_h  = float(df_tasks["wait_time"].mean() * 24) if total_tasks else 0.0
+    avg_serv_h  = float(df_tasks["service_time"].mean()* 24) if total_tasks else 0.0
+
+    # Depot utilization (%)
+    util_lines = []
+    for d in depots.values():
+        pct = (d.total_service_time / (sim_days * d.capacity) * 100.0) if d.capacity else 0.0
+        util_lines.append(f"{d.name}: {pct:.2f}%")
+    util_text = ", ".join(util_lines) if util_lines else "n/a"
+
+    # Cost totals
+    cost_totals = {}
+    if not df_costs.empty:
+        for col in ["labor_cost","overhead_cost","parts_cost","shipping_cost","downtime_cost","total_cost"]:
+            if col in df_costs.columns:
+                cost_totals[col] = float(df_costs[col].sum())
+    cost_text = ", ".join([f"{k}=${v:,.0f}" for k,v in cost_totals.items()]) if cost_totals else "n/a"
+
+    # Top stockouts (requires you computed stockouts in your exec summary path; otherwise skip)
+    # If you store inventory stats elsewhere, plug that in. Here we infer from df_tasks if present.
+    stockout_summary = "n/a"
+    if "stockouts" in df_tasks.columns and "aircraft_type" in df_tasks.columns and "repair_type" in df_tasks.columns:
+        so = (df_tasks.groupby(["aircraft_type","repair_type"])["stockouts"]
+                     .sum()
+                     .sort_values(ascending=False)
+                     .head(5))
+        stockout_summary = "; ".join([f"{a} {r}: {int(v)}" for (a,r),v in so.items()]) if len(so) else "none"
+
+    ctx = (
+        "ADTLAS Scenario Context\n"
+        f"- Total tasks: {total_tasks}\n"
+        f"- Avg wait (h): {avg_wait_h:.2f}\n"
+        f"- Avg service (h): {avg_serv_h:.2f}\n"
+        f"- Depot utilization (%): {util_text}\n"
+        f"- Cost totals: {cost_text}\n"
+        f"- Top stockouts: {stockout_summary}\n"
+        "Use ONLY this data for metrics; if the user asks for a figure, compute it from these aggregates.\n"
+    )
+    return ctx
+
+def build_results_snapshot(scen: dict, max_rows=400, max_chars=120000) -> str:
+    """
+    Create a compact JSON snapshot of key tables (truncated) to let the model
+    answer detailed questions. Watch token budget.
+    """
+    pack = {}
+    for key in ["df_tasks","df_costs","df_day"]:
+        df = scen.get(key, pd.DataFrame())
+        if not isinstance(df, pd.DataFrame) or df.empty:
+            continue
+        # keep only the most useful columns to limit size
+        useful = [c for c in df.columns if c not in ("arrival_time",)]  # tweak as needed
+        slim = df[useful].copy().head(max_rows)
+        pack[key] = json.loads(slim.to_json(orient="records"))
+    # include per-depot utilization too
+    depjson = []
+    depots = scen.get("depot_data", {})
+    sim_days = float(scen.get("sim_time", 1.0)) or 1.0
+    for d in depots.values():
+        util_pct = (d.total_service_time / (sim_days * d.capacity) * 100.0) if d.capacity else 0.0
+        depjson.append({"depot": d.name, "utilization_pct": round(util_pct,2)})
+    pack["depots"] = depjson
+    txt = json.dumps(pack, ensure_ascii=False)
+    # trim if oversized
+    if len(txt) > max_chars:
+        txt = txt[:max_chars] + "...(truncated)"
+    return txt
+
+
 # ---- Modal UI ----
 @st.dialog("ADTLAS Copilot", width="large")
 def copilot_dialog():
@@ -67,22 +156,16 @@ def copilot_dialog():
     sim_days = float(scen.get("sim_time", 1.0)) or 1.0
 
     # Build fresh context (percent utilization for THIS scenario)
-    try:
-        avg_wait_h = (df_tasks["wait_time"].mean()*24) if not df_tasks.empty else 0.0
-        avg_serv_h = (df_tasks["service_time"].mean()*24) if not df_tasks.empty else 0.0
-        util_lines = []
-        for d in depot_data.values():
-            pct = (d.total_service_time/(sim_days*d.capacity)*100.0) if d.capacity else 0.0
-            util_lines.append(f"{d.name}: {pct:.2f}%")
-        context_blob = (
-            f"Scenario: {scenario_name}\n"
-            f"Total tasks: {len(df_tasks)}\n"
-            f"Avg wait (h): {avg_wait_h:.2f} | Avg service (h): {avg_serv_h:.2f}\n"
-            f"Depot utilization (%): {', '.join(util_lines)}\n"
-            "Answer ONLY from this scenario context when quoting metrics."
-        )
-    except Exception:
-        context_blob = f"Scenario: {scenario_name}\n(Context build error, proceed generally.)"
+    scen = st.session_state.scenario_data[selected_for_chat]
+    context_blob = build_copilot_context(scen)
+
+    include_full = st.checkbox(
+         "Attach full results snapshot (may be long)",
+          value=False,
+          key="copilot_attach_full"
+    )
+    snapshot_blob = build_results_snapshot(scen) if include_full else None
+
 
     colA, colB = st.columns([1.3,1])
     with colA:
@@ -107,10 +190,21 @@ def copilot_dialog():
         }
         messages = [
             base_sys,
-            {"role":"system","name":"scenario_context","content":context_blob},
-            *_short_hist(),
-            {"role":"user","content":msg}
+            {"role": "system", "name": "scenario_context", "content": context_blob}
         ]
+
+        # Optionally include the full snapshot if the checkbox was ticked
+        if snapshot_blob:
+            messages.append({
+                "role": "system",
+                "name": "results_snapshot",
+                "content": snapshot_blob
+            })
+        
+        # Then add your rolling history and the current user message
+        messages.extend(_short_hist())
+        messages.append({"role": "user", "content": msg})
+
 
         try:
             # openai==0.28.0 interface (your current pin)
@@ -495,6 +589,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
