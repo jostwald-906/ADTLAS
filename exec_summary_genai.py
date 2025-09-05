@@ -26,8 +26,13 @@ def generate_exec_summary_genai(df_tasks: pd.DataFrame, depot_data: dict, sim_ti
         depot.name: round(depot.total_service_time / (sim_time * depot.capacity) * 100, 1)
         for depot in depot_data.values()
     }
+    # Build inventory availability dict from the passed DataFrame (if any)
+    inv_avail = {}
+    if isinstance(inventory_stats_df, pd.DataFrame) and not inventory_stats_df.empty:
+        for _, r in inventory_stats_df.iterrows():
+            key = f"{r['mds']} {r['repair_type']}"
+            inv_avail[key] = {"average": int(r["average"]), "stockouts": int(r["stockouts"])}
 
-    # Build inventory stats from suppliers: for each supplier (keyed by MDS and repair type),
     # compute average available parts and stockout events.
     inventory_stats = {}
     for key, supplier in suppliers.items():
@@ -92,6 +97,7 @@ def generate_exec_summary_genai(df_tasks: pd.DataFrame, depot_data: dict, sim_ti
         if not content:
             return "Error: Empty response from OpenAI API."
         data = json.loads(content)
+        data.setdefault("inventory_availability", inv_avail)
         exec_summary = ExecSummaryModel(**data)
         return exec_summary.json(indent=2)
     except (ValidationError, json.JSONDecodeError) as e:
@@ -123,4 +129,5 @@ if __name__ == '__main__':
     
     summary = generate_exec_summary_genai(df_sample, depot_sample, sim_time=30)
     print("Generated Executive Summary:\n", summary)
+
 
