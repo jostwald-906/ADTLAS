@@ -545,6 +545,7 @@ with tabs[7]:
     df_tasks_ctx = scen["df_tasks"]
     depot_data_ctx = scen["depot_data"]
     scen_sim_time = float(scen.get("sim_time", 1.0)) or 1.0  # safety
+    
 
     # Build fresh scenario context (percent utilization, scenario sim_time)  (NEW)
     try:
@@ -611,6 +612,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
