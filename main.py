@@ -86,7 +86,7 @@ def build_copilot_context(scen: dict) -> str:
                 cost_totals[col] = float(df_costs[col].sum())
     cost_text = ", ".join([f"{k}=${v:,.0f}" for k,v in cost_totals.items()]) if cost_totals else "n/a"
 
-   stockout_summary = "n/a"
+    stockout_summary = "n/a"
     if isinstance(inv_df, pd.DataFrame) and not inv_df.empty:
         top = inv_df.sort_values(by=["stockouts", "average"], ascending=[False, True]).head(5)
         stockout_summary = "; ".join(
@@ -170,7 +170,7 @@ def copilot_dialog():
         selected_for_chat = scenario_names[0]
 
     # Now it's safe to index the scenario_data
-   scen = st.session_state.scenario_data[selected_for_chat]
+    scen = st.session_state.scenario_data[selected_for_chat]
     context_blob  = build_copilot_context(scen)
     include_full  = st.checkbox("Attach full results snapshot (may be long)", value=False, key="copilot_attach_full")
     snapshot_blob = build_results_snapshot(scen) if include_full else None
@@ -611,6 +611,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
