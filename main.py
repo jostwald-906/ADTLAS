@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import json
 import os
 import openai
-import pandas as pd
 
 from simulation import run_simulation
 from cost import compute_task_costs, compute_time_phased_costs, compute_npv_or_roi, scenario_comparison
@@ -588,6 +587,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
