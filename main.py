@@ -359,8 +359,14 @@ with tabs[1]:
         st.markdown(f"**Average Service Time:** {avg_service:.2f} hours")
         
         # Get the JSON output from your GenAI function
-        exec_summary_json = generate_exec_summary_genai(df_tasks, scenario_dict["depot_data"], sim_time_input)
-        
+        scen = st.session_state.scenario_data[selected_scenario_exec]
+        exec_summary = generate_exec_summary_genai(
+            scen["df_tasks"],
+            scen["depot_data"],
+            scen["sim_time"],
+            scen.get("inventory_stats_df")            # NEW: pass inventory stats in
+        )
+                
         # Attempt to parse the JSON and render a custom narrative layout
         try:
             
@@ -612,6 +618,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
