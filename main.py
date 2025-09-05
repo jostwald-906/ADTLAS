@@ -190,30 +190,37 @@ def copilot_dialog():
             st.markdown(m["content"])
 
     msg = st.chat_input("Ask the Copilot…")
+    msg = st.chat_input("Ask the Copilot…")
     if msg:
-        st.session_state.copilot_hist.append({"role":"user","content":msg})
-        with st.chat_message("user"): st.markdown(msg)
-
-        # Build messages fresh each send: base + scenario context + short rolling history
-        base_sys = {
-            "role":"system",
-            "content":"You are the ADTLAS sustainment copilot. Be concise, action-oriented, and specific; focus on readiness, availability, cost, and ROI."
-        }
-
-
+        st.session_state.chat_messages.append({"role": "user", "content": msg})
+        with st.chat_message("user"):
+            st.markdown(msg)
+    
         try:
-            # openai==0.28.0 interface (your current pin)
+            # Build messages fresh each call
+            short_hist = [m for m in st.session_state.chat_messages if m["role"] in ("user", "assistant")][-6:]
+            messages = [
+                BASE_SYSTEM,
+                {"role": "system", "name": "scenario_context", "content": context_blob},
+                *short_hist,
+                {"role": "user", "content": msg},
+            ]
+    
+            # Call OpenAI
             resp = openai.ChatCompletion.create(
                 model=model_name,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=800
+                max_tokens=800,
             )
-            text = resp["choices"][0]["message"]["content"]
-            with st.chat_message("assistant"): st.markdown(text)
-            st.session_state.copilot_hist.append({"role":"assistant","content":text})
+            assistant_text = resp["choices"][0]["message"]["content"]
+            with st.chat_message("assistant"):
+                st.markdown(assistant_text)
+            st.session_state.chat_messages.append({"role": "assistant", "content": assistant_text})
+    
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 # Floating action button (bottom-right)
 fab = st.container()
@@ -577,6 +584,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
