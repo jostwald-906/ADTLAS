@@ -177,7 +177,7 @@ def copilot_dialog():
     snapshot_blob = build_results_snapshot(scen) if include_full else None
     
     messages = [
-        base_sys,
+        BASE_SYS,
         {"role": "system", "name": "scenario_context", "content": context_blob}
     ]
     if snapshot_blob:
@@ -587,6 +587,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
