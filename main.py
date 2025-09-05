@@ -175,16 +175,6 @@ def copilot_dialog():
     context_blob  = build_copilot_context(scen)
     include_full  = st.checkbox("Attach full results snapshot (may be long)", value=False, key="copilot_attach_full")
     snapshot_blob = build_results_snapshot(scen) if include_full else None
-    
-    messages = [
-        BASE_SYS,
-        {"role": "system", "name": "scenario_context", "content": context_blob}
-    ]
-    if snapshot_blob:
-        messages.append({"role": "system", "name": "results_snapshot", "content": snapshot_blob})
-    
-    messages.extend(_short_hist())
-    messages.append({"role": "user", "content": msg})
 
 
 
@@ -587,6 +577,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
