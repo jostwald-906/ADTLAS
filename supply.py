@@ -1,4 +1,6 @@
 import simpy, random
+import pandas as pd
+
 from config import SUPPLIER_DISRUPTION_START, SUPPLIER_DISRUPTION_END
 
 class Supplier:
@@ -119,3 +121,4 @@ def collect_inventory_stats():
             "stockouts": int(stats.get("stockouts", 0) or 0),
         })
     return pd.DataFrame(rows)
+
