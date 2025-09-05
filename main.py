@@ -16,6 +16,7 @@ from visualization import (
 from supply import suppliers
 from config import SIM_TIME, BASE_INTERARRIVAL, SURGE_START, SURGE_END, SURGE_MULTIPLIER, QUEUE_THRESHOLD, INVESTMENT_COST_PER_CAPACITY_UNIT
 from exec_summary_genai import generate_exec_summary_genai
+from supply import collect_inventory_stats
 
 st.set_page_config(page_title="ADTLAS Digital Twin", layout="wide")
 st.title("ADTLAS: Advanced Digital Twin for Logistics & Sustainment")
@@ -85,15 +86,13 @@ def build_copilot_context(scen: dict) -> str:
                 cost_totals[col] = float(df_costs[col].sum())
     cost_text = ", ".join([f"{k}=${v:,.0f}" for k,v in cost_totals.items()]) if cost_totals else "n/a"
 
-    # Top stockouts (requires you computed stockouts in your exec summary path; otherwise skip)
-    # If you store inventory stats elsewhere, plug that in. Here we infer from df_tasks if present.
-    stockout_summary = "n/a"
-    if "stockouts" in df_tasks.columns and "aircraft_type" in df_tasks.columns and "repair_type" in df_tasks.columns:
-        so = (df_tasks.groupby(["aircraft_type","repair_type"])["stockouts"]
-                     .sum()
-                     .sort_values(ascending=False)
-                     .head(5))
-        stockout_summary = "; ".join([f"{a} {r}: {int(v)}" for (a,r),v in so.items()]) if len(so) else "none"
+   stockout_summary = "n/a"
+    if isinstance(inv_df, pd.DataFrame) and not inv_df.empty:
+        top = inv_df.sort_values(by=["stockouts", "average"], ascending=[False, True]).head(5)
+        stockout_summary = "; ".join(
+            f"{r.mds} {r.repair_type}: {int(r.stockouts)} (avg {int(r.average)})"
+            for _, r in top.iterrows()
+        ) if not top.empty else "none"
 
     ctx = (
         "ADTLAS Scenario Context\n"
@@ -121,6 +120,14 @@ def build_results_snapshot(scen: dict, max_rows=400, max_chars=120000) -> str:
         useful = [c for c in df.columns if c not in ("arrival_time",)]  # tweak as needed
         slim = df[useful].copy().head(max_rows)
         pack[key] = json.loads(slim.to_json(orient="records"))
+
+    # NEW: include inventory stockouts/averages
+    inv_df = scen.get("inventory_stats_df", pd.DataFrame())
+    if isinstance(inv_df, pd.DataFrame) and not inv_df.empty:
+        pack["inventory_stats"] = json.loads(
+            inv_df.head(max_rows).to_json(orient="records")
+        )
+        
     # include per-depot utilization too
     depjson = []
     depots = scen.get("depot_data", {})
@@ -163,16 +170,21 @@ def copilot_dialog():
         selected_for_chat = scenario_names[0]
 
     # Now it's safe to index the scenario_data
-    scen = st.session_state.scenario_data[selected_for_chat]
-
-    context_blob = build_copilot_context(scen)
-
-    include_full = st.checkbox(
-         "Attach full results snapshot (may be long)",
-          value=False,
-          key="copilot_attach_full"
-    )
+   scen = st.session_state.scenario_data[selected_for_chat]
+    context_blob  = build_copilot_context(scen)
+    include_full  = st.checkbox("Attach full results snapshot (may be long)", value=False, key="copilot_attach_full")
     snapshot_blob = build_results_snapshot(scen) if include_full else None
+    
+    messages = [
+        base_sys,
+        {"role": "system", "name": "scenario_context", "content": context_blob}
+    ]
+    if snapshot_blob:
+        messages.append({"role": "system", "name": "results_snapshot", "content": snapshot_blob})
+    
+    messages.extend(_short_hist())
+    messages.append({"role": "user", "content": msg})
+
 
 
     colA, colB = st.columns([1.3,1])
@@ -263,13 +275,15 @@ def run_scenario():
     # Compute time-phased (daily) cost breakdown
     df_day = compute_time_phased_costs(df_costs)
     npc = compute_npv_or_roi(df_day, daily_discount_rate)
+    inv_df = collect_inventory_stats() 
     st.session_state.scenario_data[scenario_name] = {
         "df_tasks": df_tasks,
         "df_costs": df_costs,
         "df_day": df_day,
         "depot_data": depot_data,
         "npc": npc,
-        "sim_time": float(sim_time_input), 
+        "sim_time": float(sim_time_input),
+        "inventory_stats_df": inv_df
     }
     st.success(f"Scenario '{scenario_name}' has been run and saved.")
 
@@ -597,6 +611,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
