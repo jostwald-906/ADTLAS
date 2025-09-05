@@ -147,66 +147,85 @@ def build_results_snapshot(scen: dict, max_rows=400, max_chars=120000) -> str:
 # ---- Modal UI ----
 @st.dialog("ADTLAS Copilot", width="large")
 def copilot_dialog():
-    # Ensure chat history bag exists
-    if "copilot_hist" not in st.session_state:
-        st.session_state.copilot_hist = []
+    # --- state init ---
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = []
+    if "last_chat_scenario" not in st.session_state:
+        st.session_state.last_chat_scenario = None
 
-    # Guard: need at least one scenario
+    # --- guard: need a scenario ---
     if "scenario_data" not in st.session_state or not st.session_state.scenario_data:
         st.info("No scenarios available. Run a scenario first from the sidebar.")
         return
 
-    # Build the list of scenario names once
     scenario_names = list(st.session_state.scenario_data.keys())
-
-    # Single source of truth for the selection: the selectbox return value
     selected_for_chat = st.selectbox(
         "Scenario context",
         scenario_names,
-        key="copilot_scenario_select"  # session key (safe to keep)
+        key="copilot_scenario_select"
     )
-
-    # Defensive fallback: if for some reason selectbox wasn't rendered, pick first
     if not selected_for_chat:
         selected_for_chat = scenario_names[0]
 
-    # Now it's safe to index the scenario_data
+    # clear chat when scenario changes (avoid stale context)
+    if st.session_state.last_chat_scenario != selected_for_chat:
+        st.session_state.chat_messages = []
+        st.session_state.last_chat_scenario = selected_for_chat
+
+    # --- build fresh context & optional snapshot ---
     scen = st.session_state.scenario_data[selected_for_chat]
     context_blob  = build_copilot_context(scen)
-    include_full  = st.checkbox("Attach full results snapshot (may be long)", value=False, key="copilot_attach_full")
+    include_full  = st.checkbox("Attach full results snapshot (may be long)",
+                                value=False, key="copilot_attach_full")
     snapshot_blob = build_results_snapshot(scen) if include_full else None
 
-
-
+    # --- chat settings ---
     colA, colB = st.columns([1.3,1])
     with colA:
-        model_name = st.selectbox("Model", ["gpt-4o","gpt-4","gpt-3.5-turbo"], index=0, key="copilot_model")
+        model_name = st.selectbox("Model",
+                                  ["gpt-4o","gpt-4","gpt-3.5-turbo"],
+                                  index=0, key="copilot_model")
     with colB:
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05, key="copilot_temp")
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05,
+                                key="copilot_temp")
 
-    # Render chat history (user/assistant only)
-    for m in st.session_state.copilot_hist:
+    # --- render chat history ---
+    for m in st.session_state.chat_messages:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-    msg = st.chat_input("Ask the Copilot…")
+    # --- input ---
     msg = st.chat_input("Ask the Copilot…")
     if msg:
+        # add user's message to history
         st.session_state.chat_messages.append({"role": "user", "content": msg})
         with st.chat_message("user"):
             st.markdown(msg)
-    
+
+        # build messages fresh each send (base + scenario + short memory + user)
+        BASE_SYSTEM = {
+            "role": "system",
+            "content": (
+                "You are the ADTLAS sustainment copilot for USAF. "
+                "Be concise, action-oriented, and specific. Focus on readiness, availability, cost efficiency, and ROI. "
+                "When quoting metrics, use ONLY the provided context/snapshot."
+            ),
+        }
+        short_hist = [m for m in st.session_state.chat_messages
+                      if m["role"] in ("user","assistant")][-6:]
+
+        messages = [
+            BASE_SYSTEM,
+            {"role": "system", "name": "scenario_context", "content": context_blob},
+        ]
+        if snapshot_blob:
+            messages.append({"role": "system",
+                             "name": "results_snapshot",
+                             "content": snapshot_blob})
+        messages.extend(short_hist)
+        messages.append({"role": "user", "content": msg})
+
         try:
-            # Build messages fresh each call
-            short_hist = [m for m in st.session_state.chat_messages if m["role"] in ("user", "assistant")][-6:]
-            messages = [
-                BASE_SYSTEM,
-                {"role": "system", "name": "scenario_context", "content": context_blob},
-                *short_hist,
-                {"role": "user", "content": msg},
-            ]
-    
-            # Call OpenAI
             resp = openai.ChatCompletion.create(
                 model=model_name,
                 messages=messages,
@@ -216,8 +235,8 @@ def copilot_dialog():
             assistant_text = resp["choices"][0]["message"]["content"]
             with st.chat_message("assistant"):
                 st.markdown(assistant_text)
-            st.session_state.chat_messages.append({"role": "assistant", "content": assistant_text})
-    
+            st.session_state.chat_messages.append({"role": "assistant",
+                                                   "content": assistant_text})
         except Exception as e:
             st.error(f"OpenAI error: {e}")
 
@@ -584,6 +603,7 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
 
 
