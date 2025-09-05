@@ -87,7 +87,7 @@ tabs = st.tabs([
     "Economic Analysis",
     "Geospatial",
     "Inventory",
-    "Scenario Comparison"
+    "Scenario Comparison",
     "AI Copilot"
 ])
 
@@ -386,4 +386,5 @@ with tabs[7]:
 
         except Exception as e:
             st.error(f"OpenAI error: {e}")
+
 
