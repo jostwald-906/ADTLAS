@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.express as px
 import matplotlib.pyplot as plt
 import json
+import os
+import openai
 
 from simulation import run_simulation
 from cost import compute_task_costs, compute_time_phased_costs, compute_npv_or_roi, scenario_comparison
@@ -86,6 +88,7 @@ tabs = st.tabs([
     "Geospatial",
     "Inventory",
     "Scenario Comparison"
+    "AI Copilot"
 ])
 
 # Tab 1: Overview
@@ -280,3 +283,107 @@ with tabs[6]:
             st.info("No data to compare.")
     else:
         st.info("No scenarios have been run yet.")
+
+with tabs[7]:
+    st.header("AI Copilot (Chat)")
+
+    # Initialize chat history in session_state
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are the ADTLAS sustainment copilot for USAF. "
+                    "Be concise, action-oriented, and specific. Use the user's context when available. "
+                    "Focus on readiness, availability, cost efficiency, and ROI."
+                )
+            }
+        ]
+
+    # Optional: add current scenario context to the chat (once per selection)
+    if st.session_state.scenario_data:
+        selected_for_chat = st.selectbox(
+            "Select scenario to prime the copilot context",
+            list(st.session_state.scenario_data.keys()),
+            key="chat_scenario_select"
+        )
+        scen = st.session_state.scenario_data[selected_for_chat]
+        df_tasks_ctx = scen["df_tasks"]
+        depot_data_ctx = scen["depot_data"]
+
+        # Build a short, structured context string from the scenario
+        try:
+            avg_wait_h = (df_tasks_ctx["wait_time"].mean() * 24) if not df_tasks_ctx.empty else 0
+            avg_service_h = (df_tasks_ctx["service_time"].mean() * 24) if not df_tasks_ctx.empty else 0
+            util_lines = []
+            for dkey, d in depot_data_ctx.items():
+                util = (d.total_service_time / (float(st.session_state.get("sim_time", 1)) * d.capacity)) if d.capacity else 0
+                util_lines.append(f"{d.name}: {util:.2f}")
+            context_blob = (
+                f"Scenario: {selected_for_chat}\n"
+                f"Total tasks: {len(df_tasks_ctx)}\n"
+                f"Avg wait (h): {avg_wait_h:.2f}, Avg service (h): {avg_service_h:.2f}\n"
+                f"Depot utilization (fraction): {', '.join(util_lines)}\n"
+                "Use this as recent context when answering."
+            )
+        except Exception:
+            context_blob = f"Scenario: {selected_for_chat} (context build error, proceed without depot metrics)."
+
+        # Add or replace a one-time “context” message
+        if not any(m.get("role") == "system" and m.get("name") == "scenario_context"
+                   for m in st.session_state.chat_messages):
+            st.session_state.chat_messages.append({
+                "role": "system",
+                "name": "scenario_context",
+                "content": context_blob
+            })
+        else:
+            # Update existing scenario_context
+            for m in st.session_state.chat_messages:
+                if m.get("role") == "system" and m.get("name") == "scenario_context":
+                    m["content"] = context_blob
+                    break
+
+    # Chat settings
+    col1, col2, col3 = st.columns([1.3, 1, 1])
+    with col1:
+        model_name = st.selectbox("Model", ["gpt-4o", "gpt-4", "gpt-3.5-turbo"], index=0, key="chat_model")
+    with col2:
+        temperature = st.slider("Temperature", 0.0, 1.0, 0.2, 0.05, key="chat_temp")
+    with col3:
+        if st.button("Clear chat"):
+            st.session_state.chat_messages = st.session_state.chat_messages[:1]  # keep only the base system prompt
+            st.experimental_rerun()
+
+    # Render prior messages
+    for msg in st.session_state.chat_messages:
+        if msg["role"] in ("user", "assistant"):
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    # Chat input
+    user_msg = st.chat_input("Ask the ADTLAS Copilot...")
+    if user_msg:
+        # Append user message
+        st.session_state.chat_messages.append({"role": "user", "content": user_msg})
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+
+        # Call OpenAI chat completion (openai==0.28.0)
+        try:
+            with st.chat_message("assistant"):
+                # Simple, non-streaming call for reliability with 0.28
+                resp = openai.ChatCompletion.create(
+                    model=model_name,
+                    messages=st.session_state.chat_messages,
+                    temperature=temperature,
+                    max_tokens=800,
+                )
+                assistant_text = resp["choices"][0]["message"]["content"]
+                st.markdown(assistant_text)
+                # Save assistant response
+                st.session_state.chat_messages.append({"role": "assistant", "content": assistant_text})
+
+        except Exception as e:
+            st.error(f"OpenAI error: {e}")
+
